@@ -1,0 +1,126 @@
+//@version=5
+strategy("Options Trading Strategy with Labels and Dashboard", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// === Inputs ===
+// Basic Inputs
+length = input.int(30, "Lookback Length")
+tp1_multiplier = input.float(0.5, "TP1 Multiplier", step=0.1)
+tp2_multiplier = input.float(1.0, "TP2 Multiplier", step=0.1)
+tp3_multiplier = input.float(1.5, "TP3 Multiplier", step=0.1)
+stop_loss_multiplier = input.float(0.5, "Stop Loss Multiplier", step=0.1)
+
+// Time-Based Filters
+start_hour = input.int(10, "Trading Start Hour")
+end_hour = input.int(15, "Trading End Hour")
+
+// Option-Specific Inputs
+expiration_date = input.time(timestamp("2025-01-15"), "Option Expiration Date")
+risk_percentage = input.float(0.01, "Risk per Trade (%)", step=0.01)
+
+// Colors
+color_up = input.color(color.lime, "Uptrend Color")
+color_down = input.color(color.fuchsia, "Downtrend Color")
+
+// === Calculations ===
+// Trend Levels
+high_level = ta.highest(length)
+low_level = ta.lowest(length)
+mid_level = math.avg(high_level, low_level)
+
+// Targets
+var float tp1 = na
+var float tp2 = na
+var float tp3 = na
+var float stop_loss = na
+
+// Visualization Labels
+var label entry_label = na
+var label tp1_label = na
+var label tp2_label = na
+var label tp3_label = na
+
+// Determine trend direction and calculate levels
+is_uptrend = close > mid_level
+
+if is_uptrend
+    tp1 := high_level + (high_level - mid_level) * tp1_multiplier
+    tp2 := high_level + (high_level - mid_level) * tp2_multiplier
+    tp3 := high_level + (high_level - mid_level) * tp3_multiplier
+    stop_loss := low_level - (mid_level - low_level) * stop_loss_multiplier
+else
+    tp1 := low_level - (mid_level - low_level) * tp1_multiplier
+    tp2 := low_level - (mid_level - low_level) * tp2_multiplier
+    tp3 := low_level - (mid_level - low_level) * tp3_multiplier
+    stop_loss := high_level + (high_level - mid_level) * stop_loss_multiplier
+
+// Position Sizing
+account_balance = strategy.equity
+max_risk = account_balance * risk_percentage
+risk_per_trade = math.abs(mid_level - stop_loss)
+position_size = max_risk / (risk_per_trade * 100)  // Assuming option multiplier is 100
+
+// Time to Expiry
+days_to_expiry = (expiration_date - time) / 86400000
+
+// Time-Based Filter
+within_hours = (hour >= start_hour and hour <= end_hour)
+
+// === Backtesting Logic ===
+if is_uptrend and close > mid_level and within_hours
+    strategy.entry("Buy", strategy.long, qty=position_size)
+
+if strategy.position_size > 0
+    if close >= tp1
+        strategy.close("Buy", comment="TP1 Hit")
+    if close >= tp2
+        strategy.close("Buy", comment="TP2 Hit")
+    if close >= tp3
+        strategy.close("Buy", comment="TP3 Hit")
+    if close <= stop_loss
+        strategy.close("Buy", comment="Stop Loss Hit")
+
+// === Visualization Labels ===
+// Delete old labels to avoid clutter
+label.delete(entry_label)
+label.delete(tp1_label)
+label.delete(tp2_label)
+label.delete(tp3_label)
+
+// Create new labels for Entry Price and TP levels
+entry_label := label.new(bar_index, mid_level, "Entry: " + str.tostring(mid_level, "#.##"), style=label.style_label_left, color=color.gray, textcolor=color.white)
+tp1_label := label.new(bar_index, tp1, "TP1: " + str.tostring(tp1, "#.##"), style=label.style_label_left, color=color.green, textcolor=color.white)
+tp2_label := label.new(bar_index, tp2, "TP2: " + str.tostring(tp2, "#.##"), style=label.style_label_left, color=color.green, textcolor=color.white)
+tp3_label := label.new(bar_index, tp3, "TP3: " + str.tostring(tp3, "#.##"), style=label.style_label_left, color=color.green, textcolor=color.white)
+
+// === Dashboard ===
+if barstate.islast
+    var table dashboard = table.new(position.bottom_right, 7, 2, border_width=1)
+
+    // Entry Level
+    table.cell(dashboard, 0, 0, "Entry Level", bgcolor=color.gray, text_color=color.white)
+    table.cell(dashboard, 0, 1, str.tostring(mid_level, "#.##"), bgcolor=color.gray, text_color=color.white)
+
+    // Take Profit Levels
+    table.cell(dashboard, 1, 0, "TP1", bgcolor=color.green, text_color=color.white)
+    table.cell(dashboard, 1, 1, str.tostring(tp1, "#.##"), bgcolor=color.green, text_color=color.white)
+    table.cell(dashboard, 2, 0, "TP2", bgcolor=color.green, text_color=color.white)
+    table.cell(dashboard, 2, 1, str.tostring(tp2, "#.##"), bgcolor=color.green, text_color=color.white)
+    table.cell(dashboard, 3, 0, "TP3", bgcolor=color.green, text_color=color.white)
+    table.cell(dashboard, 3, 1, str.tostring(tp3, "#.##"), bgcolor=color.green, text_color=color.white)
+
+    // Stop Loss
+    table.cell(dashboard, 4, 0, "Stop Loss", bgcolor=color.red, text_color=color.white)
+    table.cell(dashboard, 4, 1, str.tostring(stop_loss, "#.##"), bgcolor=color.red, text_color=color.white)
+
+    // Days to Expiry
+    table.cell(dashboard, 5, 0, "Days to Expiry", bgcolor=color.gray, text_color=color.white)
+    table.cell(dashboard, 5, 1, str.tostring(days_to_expiry, "#.##"), bgcolor=color.gray, text_color=color.white)
+
+    // Position Size
+    table.cell(dashboard, 6, 0, "Position Size (Contracts)", bgcolor=color.gray, text_color=color.white)
+    table.cell(dashboard, 6, 1, str.tostring(position_size, "#.##"), bgcolor=color.gray, text_color=color.white)
+
+// === Alerts ===
+alertcondition(close > mid_level, title="Entry Signal", message="Price crossed Entry Level")
+alertcondition(close >= tp1, title="TP1 Hit", message="Take Profit 1 triggered")
+alertcondition(close <= stop_loss, title="Stop Loss Hit", message="Stop Loss triggered")
